@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Background gradient -->
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:angle="135"
+                android:startColor="#6A1B9A"
+                android:centerColor="#8E24AA"
+                android:endColor="#AB47BC"
+                android:type="linear" />
+        </shape>
+    </item>
+    
+    <!-- Centered text layer -->
+    <item android:gravity="center">
+        <shape android:shape="rectangle">
+            <solid android:color="@android:color/transparent" />
+            <size android:width="320dp" android:height="180dp" />
+        </shape>
+    </item>
+</layer-list>
