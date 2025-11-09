@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart';
 
 class AnimeApi {
@@ -89,7 +90,7 @@ class AnimeApi {
     'tv',
   ];
 
-  final String baseUrl = "http://192.168.2.30:4444/api";
+  static String baseUrl = dotenv.get( 'API_BASEURL', fallback: "" );
 
   Future<Map<String, dynamic>> _fetchData(String endpoint) async {
     final response = await get(Uri.parse('$baseUrl$endpoint'));
