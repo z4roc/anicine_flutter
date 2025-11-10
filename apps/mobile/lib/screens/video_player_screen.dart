@@ -4,6 +4,8 @@ import 'dart:developer';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
+import 'package:chewie/chewie.dart';
+import 'package:subtitle_wrapper_package/subtitle_wrapper_package.dart';
 import '../services/api.dart';
 import '../services/storage_service.dart';
 import '../models/stream.dart';
@@ -15,6 +17,8 @@ class VideoPlayerScreen extends StatefulWidget {
   final String? animeId;
   final String? animeTitle;
   final String? animePoster;
+  final List<dynamic>? allEpisodes; // List of all episodes for next episode feature
+  final Function(String episodeId, String episodeTitle, int episodeNumber)? onNextEpisode;
 
   const VideoPlayerScreen({
     super.key,
@@ -24,6 +28,8 @@ class VideoPlayerScreen extends StatefulWidget {
     this.animeId,
     this.animeTitle,
     this.animePoster,
+    this.allEpisodes,
+    this.onNextEpisode,
   });
 
   @override
@@ -40,21 +46,25 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   bool isLoadingStream = false;
   String? error;
 
-  VideoPlayerController? _controller;
-  bool _isPlayerReady = false;
-  bool _showControls = true;
-  bool _isFullscreen = false;
+  VideoPlayerController? _videoPlayerController;
+  ChewieController? _chewieController;
+  SubtitleController? _subtitleController;
+  
+  List<Tracks>? availableSubtitles;
+  Tracks? selectedSubtitle;
 
   @override
   void initState() {
     super.initState();
+    log('VideoPlayerScreen initialized with ${widget.allEpisodes?.length ?? 0} episodes');
     _loadServers();
     _setLandscapeMode();
   }
 
   @override
   void dispose() {
-    _controller?.dispose();
+    _chewieController?.dispose();
+    _videoPlayerController?.dispose();
     _exitFullscreen();
     super.dispose();
   }
@@ -79,39 +89,78 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     );
   }
 
-  void _toggleFullscreen() {
-    setState(() {
-      _isFullscreen = !_isFullscreen;
-      if (_isFullscreen) {
-        SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-      } else {
-        SystemChrome.setEnabledSystemUIMode(
-          SystemUiMode.manual,
-          overlays: SystemUiOverlay.values,
-        );
-      }
-    });
-  }
-
   Future<void> _initializeVideoPlayer(String videoUrl) async {
-    // Dispose old controller if exists
-    await _controller?.dispose();
+    // Dispose old controllers if they exist
+    _chewieController?.dispose();
+    await _videoPlayerController?.dispose();
     
-    setState(() {
-      _isPlayerReady = false;
-    });
-
     try {
-      _controller = VideoPlayerController.networkUrl(Uri.parse(videoUrl));
+      _videoPlayerController = VideoPlayerController.networkUrl(Uri.parse(videoUrl));
+      await _videoPlayerController!.initialize();
       
-      await _controller!.initialize();
+      // Create Chewie controller
+      _chewieController = ChewieController(
+        videoPlayerController: _videoPlayerController!,
+        autoPlay: true,
+        looping: false,
+        allowFullScreen: true,
+        allowMuting: true,
+        showControls: true,
+        materialProgressColors: ChewieProgressColors(
+          playedColor: Colors.red,
+          handleColor: Colors.red,
+          backgroundColor: Colors.grey,
+          bufferedColor: Colors.grey.shade300,
+        ),
+        placeholder: Container(
+          color: Colors.black,
+          child: const Center(
+            child: CircularProgressIndicator(color: Colors.white),
+          ),
+        ),
+        errorBuilder: (context, errorMessage) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.error, color: Colors.red, size: 48),
+                const SizedBox(height: 16),
+                Text(
+                  'Failed to load video',
+                  style: const TextStyle(color: Colors.white),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  errorMessage,
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          );
+        },
+      );
       
-      setState(() {
-        _isPlayerReady = true;
-      });
+      // Setup subtitles if available
+      if (streamInfo?.streamingLink?.tracks != null && 
+          streamInfo!.streamingLink!.tracks!.isNotEmpty) {
+        availableSubtitles = streamInfo!.streamingLink!.tracks;
+        
+        // Find default subtitle or use first available
+        selectedSubtitle = availableSubtitles!.firstWhere(
+          (track) => track.defaultId == true,
+          orElse: () => availableSubtitles!.first,
+        );
+        
+        if (selectedSubtitle != null && selectedSubtitle!.file != null) {
+          _subtitleController = SubtitleController(
+            subtitleUrl: selectedSubtitle!.file!,
+            subtitleType: SubtitleType.webvtt,
+          );
+        }
+      }
       
-      // Auto-play the video
-      _controller!.play();
+      setState(() {});
       
       // Save to watch history
       if (widget.animeId != null && widget.animeTitle != null && widget.animePoster != null) {
@@ -124,19 +173,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
           episodeTitle: widget.episodeTitle,
         );
       }
-      
-      // Listen to player state changes
-      _controller!.addListener(() {
-        if (mounted) {
-          setState(() {});
-        }
-      });
     } catch (e) {
       // Show toast instead of error screen
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to load video. Try a different server.'),
+            content: const Text('Failed to load video. Try a different server.'),
             duration: const Duration(seconds: 4),
             action: SnackBarAction(
               label: 'Change Server',
@@ -150,11 +192,22 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
           ),
         );
       }
-      setState(() {
-        _isPlayerReady = false;
-        // Don't set global error, just reset player state
-      });
+      setState(() {});
     }
+  }
+
+  void _changeSubtitle(Tracks? subtitle) {
+    setState(() {
+      selectedSubtitle = subtitle;
+      if (subtitle != null && subtitle.file != null) {
+        _subtitleController = SubtitleController(
+          subtitleUrl: subtitle.file!,
+          subtitleType: SubtitleType.webvtt,
+        );
+      } else {
+        _subtitleController = null;
+      }
+    });
   }
 
   Future<void> _loadServers() async {
@@ -169,14 +222,26 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
           ?.map((e) => Server.fromJson(e))
           .toList() ?? [];
 
+      // Get preferred server
+      final preferredServerName = await StorageService.getPreferredServer();
+
       setState(() {
         availableServers = servers;
         isLoadingServers = false;
         
-        // Auto-select first server
+        // Try to select preferred server, otherwise use first
         if (servers.isNotEmpty) {
-          selectedServer = servers.first;
-          selectedType = servers.first.type!;
+          if (preferredServerName != null) {
+            final preferred = servers.firstWhere(
+              (server) => server.serverName?.toLowerCase() == preferredServerName.toLowerCase(),
+              orElse: () => servers.first,
+            );
+            selectedServer = preferred;
+            selectedType = preferred.type!;
+          } else {
+            selectedServer = servers.first;
+            selectedType = servers.first.type!;
+          }
           _loadStream();
         }
       });
@@ -235,7 +300,71 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       selectedType = server.type!;
       streamInfo = null;
     });
+    // Save preferred server
+    if (server.serverName != null) {
+      StorageService.savePreferredServer(server.serverName!);
+    }
     _loadStream();
+  }
+
+  dynamic _getNextEpisode() {
+    if (widget.allEpisodes == null || widget.allEpisodes!.isEmpty) {
+      return null;
+    }
+
+    // Find current episode index
+    final currentIndex = widget.allEpisodes!.indexWhere((ep) {
+      if (ep is Map<String, dynamic>) {
+        return ep['episode_no']?.toString() == widget.episodeNumber.toString();
+      }
+      return false;
+    });
+
+    // Return next episode if exists
+    if (currentIndex != -1 && currentIndex < widget.allEpisodes!.length - 1) {
+      return widget.allEpisodes![currentIndex + 1];
+    }
+
+    return null;
+  }
+
+  void _playNextEpisode() {
+    final nextEpisode = _getNextEpisode();
+    if (nextEpisode == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No more episodes available'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
+    if (widget.onNextEpisode != null) {
+      final nextEpisodeId = nextEpisode['id']?.toString() ?? '';
+      final nextEpisodeTitle = nextEpisode['title']?.toString() ?? 
+                               'Episode ${nextEpisode['episode_no']}';
+      final nextEpisodeNumber = int.tryParse(nextEpisode['episode_no']?.toString() ?? '0') ?? 0;
+      
+      widget.onNextEpisode!(nextEpisodeId, nextEpisodeTitle, nextEpisodeNumber);
+    } else {
+      // Fallback: Navigate with replacement
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) => VideoPlayerScreen(
+            episodeId: nextEpisode['id']?.toString() ?? '',
+            episodeTitle: nextEpisode['title']?.toString() ?? 
+                         'Episode ${nextEpisode['episode_no']}',
+            episodeNumber: int.tryParse(nextEpisode['episode_no']?.toString() ?? '0') ?? 0,
+            animeId: widget.animeId,
+            animeTitle: widget.animeTitle,
+            animePoster: widget.animePoster,
+            allEpisodes: widget.allEpisodes,
+          ),
+        ),
+      );
+    }
   }
 
   @override
@@ -287,13 +416,13 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                     )
                   : Stack(
                       children: [
-                        // Video player
+                        // Video player with subtitles
                         Center(
                           child: isLoadingStream
                               ? const CircularProgressIndicator(
                                   color: Colors.white,
                                 )
-                              : streamInfo != null && streamInfo!.streamingLink != null
+                              : streamInfo != null && _chewieController != null
                                   ? _buildVideoPlayer()
                                   : const Column(
                                       mainAxisAlignment: MainAxisAlignment.center,
@@ -317,18 +446,15 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                           top: 0,
                           left: 0,
                           right: 0,
-                          child: AnimatedOpacity(
-                            opacity: _showControls ? 1.0 : 0.0,
-                            duration: const Duration(milliseconds: 300),
-                            child: Container(
-                              decoration: BoxDecoration(
-                                gradient: LinearGradient(
-                                  begin: Alignment.topCenter,
-                                  end: Alignment.bottomCenter,
-                                  colors: [
-                                    Colors.black.withOpacity(0.7),
-                                    Colors.transparent,
-                                  ],
+                          child: Container(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [
+                                  Colors.black.withOpacity(0.7),
+                                  Colors.transparent,
+                                ],
                                 ),
                               ),
                               child: SafeArea(
@@ -368,7 +494,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                                       // Server options menu
                                       if (availableServers.isNotEmpty)
                                         PopupMenuButton<Server>(
-                                          icon: const Icon(Icons.settings, color: Colors.white),
+                                          icon: const Icon(Icons.dns, color: Colors.white),
                                           tooltip: 'Server Options',
                                           onSelected: _changeServer,
                                           itemBuilder: (context) => [
@@ -404,11 +530,59 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                                             }),
                                           ],
                                         ),
+                                      // Subtitle options menu
+                                      if (availableSubtitles != null && availableSubtitles!.isNotEmpty)
+                                        PopupMenuButton<Tracks?>(
+                                          icon: const Icon(Icons.closed_caption, color: Colors.white),
+                                          tooltip: 'Subtitle Options',
+                                          onSelected: _changeSubtitle,
+                                          itemBuilder: (context) => [
+                                            const PopupMenuItem<Tracks?>(
+                                              enabled: false,
+                                              child: Text(
+                                                'Subtitles',
+                                                style: TextStyle(fontWeight: FontWeight.bold),
+                                              ),
+                                            ),
+                                            PopupMenuItem<Tracks?>(
+                                              value: null,
+                                              child: Row(
+                                                children: [
+                                                  if (selectedSubtitle == null)
+                                                    const Icon(Icons.check, size: 16),
+                                                  if (selectedSubtitle == null)
+                                                    const SizedBox(width: 8),
+                                                  const Text('Off'),
+                                                ],
+                                              ),
+                                            ),
+                                            ...availableSubtitles!.map((track) {
+                                              return PopupMenuItem<Tracks?>(
+                                                value: track,
+                                                child: Row(
+                                                  children: [
+                                                    if (track == selectedSubtitle)
+                                                      const Icon(Icons.check, size: 16),
+                                                    if (track == selectedSubtitle)
+                                                      const SizedBox(width: 8),
+                                                    Text(track.label ?? track.kind ?? 'Unknown'),
+                                                  ],
+                                                ),
+                                              );
+                                            }),
+                                          ],
+                                        ),
+                                      // Next Episode button
+                                      if (_getNextEpisode() != null)
+                                        IconButton(
+                                          icon: const Icon(Icons.skip_next, color: Colors.white),
+                                          tooltip: 'Next Episode',
+                                          onPressed: _playNextEpisode,
+                                        ),
                                     ],
                                   ),
                                 ),
                               ),
-                            ),
                           ),
                         ),
                       ],
@@ -417,7 +591,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   }
 
   Widget _buildVideoPlayer() {
-    if (_controller == null || !_isPlayerReady) {
+    if (_chewieController == null) {
       return Container(
         color: Colors.black,
         child: const Center(
@@ -426,152 +600,22 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       );
     }
 
-    return GestureDetector(
-      onTap: () {
-        setState(() {
-          _showControls = !_showControls;
-        });
-        // Auto-hide controls after 3 seconds
-        if (_showControls) {
-          Future.delayed(const Duration(seconds: 3), () {
-            if (mounted && _controller!.value.isPlaying) {
-              setState(() {
-                _showControls = false;
-              });
-            }
-          });
-        }
-      },
-      child: Container(
-        color: Colors.black,
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            // Video player
-            Center(
-              child: AspectRatio(
-                aspectRatio: _controller!.value.aspectRatio,
-                child: VideoPlayer(_controller!),
-              ),
-            ),
-            
-            // Play/Pause overlay (center)
-            if (!_controller!.value.isPlaying && _showControls)
-              Container(
-                color: Colors.black.withOpacity(0.3),
-                child: const Center(
-                  child: Icon(
-                    Icons.play_circle_outline,
-                    size: 80,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-            
-            // Video controls overlay (bottom)
-            Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
-              child: AnimatedOpacity(
-                opacity: _showControls ? 1.0 : 0.0,
-                duration: const Duration(milliseconds: 300),
-                child: _buildVideoControls(),
-              ),
-            ),
-          ],
+    // Wrap video player with subtitle overlay if subtitles are enabled
+    if (_subtitleController != null) {
+      return SubtitleWrapper(
+        subtitleController: _subtitleController!,
+        videoPlayerController: _videoPlayerController!,
+        subtitleStyle: const SubtitleStyle(
+          fontSize: 16,
+          textColor: Colors.white,
+          hasBorder: true,
+          position: SubtitlePosition(bottom: 20),
         ),
-      ),
-    );
-  }
-
-  Widget _buildVideoControls() {
-    if (_controller == null) return const SizedBox.shrink();
-
-    final duration = _controller!.value.duration;
-    final position = _controller!.value.position;
-
-    return Container(
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            Colors.transparent,
-            Colors.black.withOpacity(0.7),
-          ],
-        ),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Progress bar
-          VideoProgressIndicator(
-            _controller!,
-            allowScrubbing: true,
-            colors: const VideoProgressColors(
-              playedColor: Colors.red,
-              bufferedColor: Colors.grey,
-              backgroundColor: Colors.white24,
-            ),
-          ),
-          const SizedBox(height: 8),
-          
-          // Control buttons and time
-          Row(
-            children: [
-              // Play/Pause button
-              IconButton(
-                icon: Icon(
-                  _controller!.value.isPlaying
-                      ? Icons.pause
-                      : Icons.play_arrow,
-                  color: Colors.white,
-                ),
-                onPressed: () {
-                  setState(() {
-                    if (_controller!.value.isPlaying) {
-                      _controller!.pause();
-                    } else {
-                      _controller!.play();
-                    }
-                  });
-                },
-              ),
-              
-              // Time display
-              Text(
-                '${_formatDuration(position)} / ${_formatDuration(duration)}',
-                style: const TextStyle(color: Colors.white, fontSize: 12),
-              ),
-              
-              const Spacer(),
-              
-              // Fullscreen toggle button
-              IconButton(
-                icon: Icon(
-                  _isFullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
-                  color: Colors.white,
-                ),
-                onPressed: _toggleFullscreen,
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _formatDuration(Duration duration) {
-    String twoDigits(int n) => n.toString().padLeft(2, '0');
-    final hours = duration.inHours;
-    final minutes = duration.inMinutes.remainder(60);
-    final seconds = duration.inSeconds.remainder(60);
-    
-    if (hours > 0) {
-      return '$hours:${twoDigits(minutes)}:${twoDigits(seconds)}';
+        videoChild: Chewie(controller: _chewieController!),
+      );
     }
-    return '${twoDigits(minutes)}:${twoDigits(seconds)}';
+
+    // Return video player without subtitles
+    return Chewie(controller: _chewieController!);
   }
 }

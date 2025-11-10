@@ -38,6 +38,8 @@ dependencies:
   video_player: ^2.10.0
   shared_preferences: ^2.5.3
   flutter_dotenv: ^6.0.0
+  subtitle_wrapper_package: ^2.2.1
+  chewie: ^1.13.0
 
 
 dev_dependencies:

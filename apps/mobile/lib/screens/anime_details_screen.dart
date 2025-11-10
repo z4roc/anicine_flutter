@@ -99,7 +99,7 @@ class _AnimeDetailsScreenState extends State<AnimeDetailsScreen> {
   Future<void> _toggleWatchlist() async {
     if (animeData == null) return;
 
-    final details = AnimeDetails.fromJson(animeData!['results']);
+    final details = AnimeDetails.fromJson(animeData!['data']);
     
     if (isInWatchlist) {
       await StorageService.removeFromWatchlist(widget.animeId);
@@ -507,6 +507,11 @@ class _AnimeDetailsScreenState extends State<AnimeDetailsScreen> {
                               animeId: animeDetails.id,
                               animeTitle: animeDetails.title,
                               animePoster: animeDetails.poster,
+                              allEpisodes: episodes.map((ep) => {
+                                'id': ep.id,
+                                'episode_no': ep.episodeNo,
+                                'title': ep.title,
+                              }).toList(),
                             ),
                           ),
                         );

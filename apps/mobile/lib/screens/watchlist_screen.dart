@@ -9,13 +9,23 @@ class WatchlistScreen extends StatefulWidget {
   State<WatchlistScreen> createState() => _WatchlistScreenState();
 }
 
-class _WatchlistScreenState extends State<WatchlistScreen> {
+class _WatchlistScreenState extends State<WatchlistScreen> with AutomaticKeepAliveClientMixin {
   List<Map<String, dynamic>> watchlist = [];
   bool isLoading = true;
 
   @override
+  bool get wantKeepAlive => false; // Don't keep state alive
+
+  @override
   void initState() {
     super.initState();
+    _loadWatchlist();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Reload watchlist when screen becomes visible
     _loadWatchlist();
   }
 
@@ -48,6 +58,7 @@ class _WatchlistScreenState extends State<WatchlistScreen> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context); // Required by AutomaticKeepAliveClientMixin
     return Scaffold(
       appBar: AppBar(
         automaticallyImplyLeading: false,

@@ -182,6 +182,11 @@ class _EpisodesScreenState extends State<EpisodesScreen> {
                     animeId: widget.animeId,
                     animeTitle: widget.animeTitle,
                     animePoster: widget.animePoster,
+                    allEpisodes: episodes.map((ep) => {
+                      'id': ep.id,
+                      'episode_no': ep.episodeNo,
+                      'title': ep.title,
+                    }).toList(),
                   ),
                 ),
               );

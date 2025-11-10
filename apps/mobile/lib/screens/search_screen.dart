@@ -48,7 +48,7 @@ class _SearchScreenState extends State<SearchScreen> {
     try {
       final data = await _api.searchAnime(query);
       // Extract results array directly (no nested results object)
-      final results = (data['results'] as List<dynamic>?)
+      final results = (data['results']['data'] as List<dynamic>?)
           ?.map((e) => Anime.fromJson(e))
           .toList() ?? [];
       

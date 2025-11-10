@@ -178,4 +178,17 @@ class StorageService {
 
     return Map<String, dynamic>.from(jsonDecode(progressJson));
   }
+
+  // Server preference
+  static const String _preferredServerKey = 'preferred_server';
+
+  static Future<void> savePreferredServer(String serverName) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_preferredServerKey, serverName);
+  }
+
+  static Future<String?> getPreferredServer() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_preferredServerKey);
+  }
 }
