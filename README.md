@@ -1,6 +1,6 @@
 # AniCineHome
 
-Small educational project for writing TV and Mobile Apps
+Small educational project used to practice writing TV and mobile apps with flutter
 
 Based on https://github.com/itzzzme/anime-api, you need to host it yourself. 
 Only provides existing data to a frontend
